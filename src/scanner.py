@@ -113,7 +113,7 @@ def main():
     # for x in range(100000):
     while True:
         # iq_all = iq_buffer.get()  # TODO: put back
-        iq_all = np.fromfile("iq_examples/g_adsb.iq", dtype=np.complex64)
+        iq_all = np.fromfile("iq_examples/a.iq", dtype=np.complex64)  # imagine this as a single block
         print("new buffer...\n")
         while len(iq_all) != 0:
             iq_data = iq_all[:500]
@@ -130,21 +130,25 @@ def main():
 
             # discard the preamble
             int_block = bits_to_int(msg_bits[8:])
-            u = pms.decode(int_block)
+            u = pms.decode(int_block)  # TODO: delete eventually
 
+            # TODO: discard message that fails CRC check
             if not validate_crc(int_block):
                 continue
 
-            print(msg_bits[8:])
-            print(u)
+            if Aircraft.is_adsb(msg_bits[8:]):
+                pass
+                # print("abds format!")
 
-            temp_aircraft = Aircraft(squitter_bits=msg_bits, timestamp=time.time())
-            icao_hex = temp_aircraft.icao_hex
+
+            # print(u)
+            # print(Aircraft.get_icao(msg_bits[8:]))  # TODO: discard preamble
+            icao_hex = Aircraft.get_icao(msg_bits[8:])
             if icao_hex not in tracked_aircrafts:
                 print(f"new aircraft identified: {icao_hex}")
-                tracked_aircrafts[icao_hex] = temp_aircraft
+                tracked_aircrafts[icao_hex] = Aircraft(squitter_bits=msg_bits, timestamp=time.time())
             else:
-                print("seen aircraft before, updating aircraft object")
+                # print("seen aircraft before, updating aircraft object")
                 aircraft = tracked_aircrafts[icao_hex]
                 aircraft.update_squitter(squitter_bits=msg_bits, timestamp=time.time())
             print("\n")
@@ -153,14 +157,14 @@ def main():
         # TODO: remove when live loop
         break
 
-    print(tracked_aircrafts)
-    t = Aircraft("111111111000110101000000011011100001000001011000000101110001011000110111010011100110000111100000111101110110001101011000")
-    t.decode_airborne_position()
-    time.sleep(3)
-    t.update_squitter("111111111000110101000000011011100001000001011000000110010100001010010100001110111011100100010001010110111010001011010111")
-    t.decode_airborne_position()
-    print()
-    t.dump_info()
+    # print(tracked_aircrafts)
+    # t = Aircraft("111111111000110101000000011011100001000001011000000101110001011000110111010011100110000111100000111101110110001101011000")
+    # t.decode_airborne_position()
+    # time.sleep(3)
+    # t.update_squitter("111111111000110101000000011011100001000001011000000110010100001010010100001110111011100100010001010110111010001011010111")
+    # t.decode_airborne_position()
+    # print()
+    # t.dump_info()
 
 
 

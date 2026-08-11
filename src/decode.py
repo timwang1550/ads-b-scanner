@@ -51,8 +51,24 @@ class TypeCode:
         22,
     )  # airborne position using GNSS
     AIRCRAFT_STATUS = (28,)  # aircraft status
-    TARGET_SATE = (29,)  # TODO: do this
+    TARGET_STATE = (29,)  # TODO: do this
     OPERATION_STATUS = (31,)  # aircraft operation status
+
+
+class AircraftCategory:
+    """"""
+    # 2 are surface, 3 are small amatuer
+    # only looking to track large vehicles
+    DECODER = {
+        4: {
+            1: "Light",  # <7,000 kg
+            2: "Medium 1",  # 7,000-34,000 kg
+            3: "Medium 2",  # 7,000-136,000 kg
+            4: "High Vortex Aircraft",
+            5: "Heavy",  # >136,000 kg
+            6: "High Performance",  # >5g accel, >400kt
+        },
+    }
 
 
 def iq_to_pulses(iq_block):

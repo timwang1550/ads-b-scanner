@@ -22,7 +22,6 @@ class Aircraft:
 
     msg_timestamp = -1
     squitter_bits = ""
-    preamble = ""
     df = ""
     ca = ""
     icao = ""
@@ -31,6 +30,7 @@ class Aircraft:
     pi = ""
 
     callsign = ""
+    aircraft_type = ""
 
     # CPR register + flags
     cpr_even_timestamp: float = -1.0  # unit time
@@ -51,8 +51,8 @@ class Aircraft:
     # Altitude register + flags
     altitude: float = -1.0
 
-    def __init__(self, squitter_bits: str | None = None, timestamp: float | None = None):
-        """ """
+    def __init__(self, squitter_bits: str, timestamp: float | None = None):
+        """Squitter Bits withouthe preamble?"""
         self.squitter_bits = squitter_bits
         self.msg_timestamp = timestamp if timestamp else time.time()
 
@@ -67,9 +67,24 @@ class Aircraft:
         self.parse_message(self.squitter_bits)
         # TODO: check icao matches, before updating
 
+
+    @staticmethod
+    def is_adsb(msg_bits: str) -> bool:
+        """Pull downlink format without parsing entire message, to identify a ADS-B squitter."""
+        df_format = bits_to_int(msg_bits[:5])
+        return df_format == 17  # TODO: constant this?
+
+    @staticmethod
+    def get_icao(msg_bits: str) -> str:
+        """Pull ICAO hex without parsing entire message."""  # TODO: update
+        return f"{bits_to_int(msg_bits[8:32]):X}"
+
+
+    # TODO: discard preamble
     def parse_message(self, msg):
         """Split message into fundamental blocks, then decide how to process message"""
-        self.preamble = msg[0:8]  # 8 bit preamble
+        _ = msg[0:8]  # 8 bit preamble, discarded
+
         self.df = bits_to_int(msg[8:13])  # 5 bit downlink format
         self.ca = bits_to_int(msg[13:16])  # 3 bit transponder capability
         self.icao = bits_to_int(msg[16:40])  # 24 bit ICAO aircraft address
@@ -92,14 +107,17 @@ class Aircraft:
 
 
     def decode_msg(self):
+        """Decide how to decode a message based on its typecode."""
         if self.tc in TypeCode.AIRCRAFT_ID:
-            print("not implemented this yet")  # run decode callsign + decode vehicle type
-        if self.tc in TypeCode.AIR_POS_BARO or self.tc in TypeCode.AIR_POS_GNSS:
+            self.decode_callsign()
+            self.decode_aircraft_type()
+        elif self.tc in TypeCode.AIR_POS_BARO or self.tc in TypeCode.AIR_POS_GNSS:
             self.decode_airborne_position()
-        if self.tc in TypeCode.AIR_VEL:
-            pass
-
-        print(f"not doing anything with this type code yet {self.tc}")
+        elif self.tc in TypeCode.AIR_VEL:
+            self.decode_velocity()
+        else:
+            print(f"not doing anything with this type code yet {self.tc}")
+            # so far 28,29,31
 
 
     def dump_info(self):
@@ -123,6 +141,18 @@ class Aircraft:
             self.callsign += CALLSIGN_CHAR_LUT[char_idx]
 
         return self.callsign
+
+    def decode_aircraft_type(self):
+        """decode what kinda vehicle"""
+        tc = self.me[:5]  # first 8b its
+        ca = self.me[5:8]
+
+        # reserved or unused, no available info
+        if tc == 1 or ca == 0:
+            self.aircraft_type = ""
+            return
+
+        
 
 
     def decode_airborne_position(self):
@@ -269,10 +299,7 @@ class Aircraft:
         # TODO: can we valid this? lets jsut work with the baro altitude
 
 
-"""  test 
-import adsb_receiver.aircraft as aa
-y = aa.Aircraft("101010101000110101000000011000100001110101011000110000111000001011010110100100001100100010101100001010000110001110100111")
-y.decode_airborne_position()
-y.update_squitter("101010101000110101000000011000100001110101011000110000111000011001000011010111001100010000010010011010010010101011010110")
-y.decode_airborne_position()
-"""
+    def decode_velocity(self):
+        """assumes message is from a subsonic aircraft"""
+        pass
+        

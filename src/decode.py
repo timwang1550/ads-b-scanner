@@ -55,20 +55,17 @@ class TypeCode:
     OPERATION_STATUS = (31,)  # aircraft operation status
 
 
-class AircraftCategory:
-    """"""
-    # 2 are surface, 3 are small amatuer
-    # only looking to track large vehicles
-    DECODER = {
-        4: {
-            1: "Light",  # <7,000 kg
-            2: "Medium 1",  # 7,000-34,000 kg
-            3: "Medium 2",  # 7,000-136,000 kg
-            4: "High Vortex Aircraft",
-            5: "Heavy",  # >136,000 kg
-            6: "High Performance",  # >5g accel, >400kt
-        },
-    }
+# TODO: short this better
+# 2 are surface, 3 are small amatuer
+    # only looking to track large vehicles (4)
+LargeAircraftCategory = {
+    1: "Light",  # <7,000 kg
+    2: "Medium 1",  # 7,000-34,000 kg
+    3: "Medium 2",  # 7,000-136,000 kg
+    4: "High Vortex Aircraft",
+    5: "Heavy",  # >136,000 kg
+    6: "High Performance",  # >5g accel, >400kt
+}
 
 
 def iq_to_pulses(iq_block):
@@ -98,11 +95,17 @@ def pulses_to_bits(pulse_block):
 
 def bits_to_int(bit_block):
     """convert big endian binary string into integer"""
-    bit_num = 0
-    for pow_of_2, bit in enumerate(bit_block[::-1]):
-        bit_num += int(bit) * (2**pow_of_2)
+    if bit_block == "1":
+        return 1
+    if bit_block == "0":
+        return 0
 
-    return bit_num
+    bit_sum = 0
+    for pow_of_2, bit in enumerate(bit_block[::-1]):
+        bit_sum += int(bit) * (2**pow_of_2)
+    # TODO can improve efficient by removing the int() call but w/ev
+
+    return bit_sum
 
 
 def find_msg_start(pulse_block):

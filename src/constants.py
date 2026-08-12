@@ -1,5 +1,5 @@
 """
-u know
+useful constants for decoding ADS-B messages
 """
 
 

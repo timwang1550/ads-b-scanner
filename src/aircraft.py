@@ -4,12 +4,13 @@ import numpy as np
 import time
 
 from decode import (
-    DownLinkFormat,
     TypeCode,
     bits_to_int,
+    LargeAircraftCategory,
+    ADSBException,
 )
 
-from cpr import (
+from cpr_utils import (
     DLAT_EVEN,
     DLAT_ODD,
     mod,
@@ -18,7 +19,7 @@ from cpr import (
 
 
 class Aircraft:
-    """aircraft"""
+    """Class to represent an aircraft."""
 
     msg_timestamp = -1
     squitter_bits = ""
@@ -32,7 +33,7 @@ class Aircraft:
     callsign = ""
     aircraft_type = ""
 
-    # CPR register + flags
+    # CPR registers + flags
     cpr_even_timestamp: float = -1.0  # unit time
     cpr_lat_even: float = -1.0
     cpr_lon_even: float = -1.0
@@ -48,8 +49,15 @@ class Aircraft:
     real_lat_valid: bool = False
     real_lon_valid: bool = False
 
-    # Altitude register + flags
+    # Altitude registers + flags
     altitude: float = -1.0
+
+    # Velocity registers + flags
+    vertical_velocity: float = -1.0  # ft/min
+    x_velocity: float = -1.0  # kt
+    y_velocity: float = -1.0  # kt
+    horizontal_velocity: float = -1.0  # kt
+    track_angle: float = -1.0  # deg [0,360)
 
     def __init__(self, squitter_bits: str, timestamp: float | None = None):
         """Squitter Bits withouthe preamble?"""
@@ -70,9 +78,19 @@ class Aircraft:
 
     @staticmethod
     def is_adsb(msg_bits: str) -> bool:
-        """Pull downlink format without parsing entire message, to identify a ADS-B squitter."""
+        """Pull downlink format without parsing entire message.
+        Return true if ADS-B squitter.
+        """
         df_format = bits_to_int(msg_bits[:5])
         return df_format == 17  # TODO: constant this?
+
+
+    @staticmethod
+    def is_large_aircraft(msg_bits: str) -> bool:
+        """Pull aircraft type without parsing entire message.
+        Return true if a large vehicle.
+        """
+        pass # TODO: finish
 
     @staticmethod
     def get_icao(msg_bits: str) -> str:
@@ -100,7 +118,7 @@ class Aircraft:
         self.decode_msg()
 
 
-    @property
+    @property  # TODO move all properties make all
     def icao_hex(self):
         """Aircraft's ICAO designator as a hexadecimal string"""
         return f"{self.icao:X}"
@@ -111,21 +129,26 @@ class Aircraft:
         if self.tc in TypeCode.AIRCRAFT_ID:
             self.decode_callsign()
             self.decode_aircraft_type()
+        elif self.tc in TypeCode.SURFACE_POS:
+            pass  # currently ignoring surface velocity
         elif self.tc in TypeCode.AIR_POS_BARO or self.tc in TypeCode.AIR_POS_GNSS:
             self.decode_airborne_position()
         elif self.tc in TypeCode.AIR_VEL:
             self.decode_velocity()
         else:
-            print(f"not doing anything with this type code yet {self.tc}")
+            # print(f"not doing anything with this type code yet {self.tc}")
+            pass
             # so far 28,29,31
 
 
-    def dump_info(self):
+    def dump_info(self):  # TODO eventually right shift everything to be fancy and nice
         """dump what you know"""
-        print(f"ICAO: {self.icao:X}")
-        print(f"Altitude: {self.altitude if self.altitude != -1 else ''}")
-        print(f"Latitude: {self.real_lat if self.real_lat_valid else ''}")
-        print(f"Longitude: {self.real_lon if self.real_lon_valid else ''}")
+        print(f"\033[KICAO:\t\t{self.icao:X}")
+        print(f"\033[KCallsign:\t{self.callsign}")
+        print(f"\033[KAircraft Type:\t{self.aircraft_type}")
+        print(f"\033[KAltitude:\t{self.altitude if self.altitude != -1 else ''}")
+        print(f"\033[KLatitude:\t{round(self.real_lat, 4) if self.real_lat_valid else ''}")
+        print(f"\033[KLongitude:\t{round(self.real_lon, 4) if self.real_lon_valid else ''}")
 
 
     def decode_callsign(self):
@@ -144,15 +167,9 @@ class Aircraft:
 
     def decode_aircraft_type(self):
         """decode what kinda vehicle"""
-        tc = self.me[:5]  # first 8b its
-        ca = self.me[5:8]
-
-        # reserved or unused, no available info
-        if tc == 1 or ca == 0:
-            self.aircraft_type = ""
-            return
-
-        
+        tc = bits_to_int(self.me[:5])  # first 8b its
+        ca = bits_to_int(self.me[5:8])
+        self.aircraft_type = LargeAircraftCategory[ca]
 
 
     def decode_airborne_position(self):
@@ -178,25 +195,30 @@ class Aircraft:
             self.cpr_lon_odd = cpr_lon
             self.cpr_odd_timestamp = self.msg_timestamp
             self.cpr_odd_valid = True
+            # print(f"{[self.icao]} odd frame")
         else:
             self.cpr_lat_even = cpr_lat
             self.cpr_lon_even = cpr_lon
             self.cpr_even_timestamp = self.msg_timestamp
             self.cpr_even_valid = True
+            # print(f"{[self.icao]} even frame")
 
         # if both frames are valid, attempt to decode real position
         if self.cpr_even_valid and self.cpr_odd_valid:
+            # print("new valid cpr frame, try to decode")
             self.get_latitude()
             self.get_longitude()
-            print(self.real_lat, self.real_lon)
+            # print(self.real_lat, self.real_lon) # TODO: debug
             # reset the unused lat & lon so next valid frame can be calculated
+
+            # clear the oldest cpr message
+            self.reset_oldest_cpr()
 
 
     def get_latitude(self):
         """"""
         if not self.cpr_even_valid or not self.cpr_odd_valid:
-            print("need valid frames u suck")
-            return
+            raise ADSBException("Latitude decoding requires even and odd frames!""")
 
         # calculate latitude zone index
         j = np.floor(59 * self.cpr_lat_even - 60 * self.cpr_lat_odd + 0.5)
@@ -208,8 +230,7 @@ class Aircraft:
             print(
                 "DEBUG: latitudes are part of different index, messages are too far apart"
             )
-            # TODO: reset the cpr values?
-            self.reset_cpr()
+            self.reset_oldest_cpr()
             return
 
         # select latitude from the more recent of the two messages
@@ -231,8 +252,7 @@ class Aircraft:
     def get_longitude(self):
         """Requires a valid lat to make a lon?"""
         if not self.real_lat_valid:
-            print("calc lat first?")
-            return
+            raise ADSBException("Longitude decoding requires valid latitude!""")
 
         # calculate longitude zone index
         nl = get_nl(self.real_lat)
@@ -251,10 +271,10 @@ class Aircraft:
 
         # select latitude from the more recent of the two messages
         if self.cpr_even_timestamp > self.cpr_odd_timestamp:
-            # print("selecting even longitude")  # TODO: turn into debug
+            # print(f"{[self.icao]}selecting even longitude")  # TODO: turn into debug
             self.real_lon = lon_even
         else:
-            # print("selecting odd longitude")
+            # print(f"{[self.icao]}selecting odd longitude")
             self.real_lon = lon_odd
 
         # normalize to [-180, 180] for aviation convention
@@ -265,15 +285,14 @@ class Aircraft:
         return self.real_lon
 
 
-    def reset_cpr(self):
-        """Reset CPR coordinates."""
-        self.cpr_lat_even = ""
-        self.cpr_lat_odd = ""
-        self.cpr_lon_even = ""
-        self.cpr_lon_odd = ""
-
-        # reset real lat + timestamps
-        # reset valid flags
+    def reset_oldest_cpr(self):
+        """Reset CPR valid flag on oldest message."""
+        if self.cpr_even_timestamp > self.cpr_odd_timestamp:
+            # print(f"{[self.icao]}reset odd frame")
+            self.cpr_odd_timestamp = False
+        else:
+            # print(f"{[self.icao]}reset even frame")
+            self.cpr_even_timestamp = False
 
 
     def get_barometric_altitude(self, altitude_bits):
@@ -286,20 +305,76 @@ class Aircraft:
         if q_bit:  # Q=1, 25ft increment
             remainder = bits_to_int(altitude_bits[:8] + altitude_bits[9:])
             self.altitude = remainder * 25 - 1000
-            print(f"baro alt {self.altitude}")
+            # print(f"baro alt {self.altitude}")  # TODO: debug
             return self.altitude
         else:  # Q=0, 100ft increment
-            print("havent implemented the graycode version")
+            # print("havent implemented the graycode version")
+            pass # TODO: add these
 
 
     def get_gnss_altitude(self, altitude_bits):
         self.altitude = bits_to_int(altitude_bits)
-        print(f"gnss alt {self.altitude}")
+        # print(f"gnss alt {self.altitude}")  # TODO: debug
         return self.altitude
         # TODO: can we valid this? lets jsut work with the baro altitude
 
 
     def decode_velocity(self):
         """assumes message is from a subsonic aircraft"""
-        pass
-        
+        subtype = self.me[5:8]
+        intent_flag = self.me[8]
+        ifr_flag = self.me[9]
+        nav_uncertainty = self.me[10:13]
+        horizontal_velocity = self.me[13:35]
+        vertical_source = self.me[35]  # 0 gnss 1 for baro
+        vertical_direction = self.me[36]  # 0 up 1 down
+        vertical_rate = bits_to_int(self.me[37:46])
+        reserved = self.me[46:48]  # reserve, del
+        gnss_baro_direction = self.me[48]  # 0 gnss above baro, 1 gnss below baro
+        gnss_baro_diff = self.me[49:]
+
+        # decode subtype
+        subtype = bits_to_int(self.me[5:8])
+        if subtype in (3,4):
+            return  # ignore GNSS-based speeds for now
+        subtype_factor = 1 if (subtype == 1) else 4
+
+        # decode vertical speed if information is provided
+        if vertical_rate != 0:
+            sign = 1 if vertical_direction == 0 else -1
+            self.vertical_velocity = (sign*64) * (vertical_rate - 1)
+
+        # decode east-west (x) horizontal speed
+        x_direction = bits_to_int(self.me[13])
+        x_speed = bits_to_int(self.me[14:24])
+        x_dir = -1 if x_direction else 1
+        self.x_velocity = (
+            (x_dir*subtype_factor) * (x_speed - 1)
+        )
+
+        # decode north-south (y) horizontal speed
+        y_direction = bits_to_int(self.me[24])
+        y_speed = bits_to_int(self.me[25:35])
+        y_dir = -1 if y_direction else 1
+        self.y_velocity = (
+            (y_dir*subtype_factor) * (y_speed - 1)
+        )
+
+        # decode final ground speed
+        self.horizontal_velocity = (
+            np.sqrt(self.x_velocity**2 + self.y_velocity**2)
+        )
+
+        # decode final track angle (clockwise from north)
+        track_angle = (np.atan2(self.x_velocity, self.y_velocity) * 360) / (2*np.pi)
+        self.track_angle = mod(track_angle, 360)
+
+
+        # TODO: debug msg
+        # TODO, convert everything to m/s?
+        # TODO: dont display vertical if its -1
+        # print(f"{self.vertical_velocity} ft/min, {self.horizontal_velocity} kt")
+        # print(f"final x and y components {self.x_velocity} kt, {self.y_velocity} kt")
+        # print(f"{self.track_angle} deg from north")
+
+
